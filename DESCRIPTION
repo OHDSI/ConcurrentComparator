@@ -1,0 +1,25 @@
+Package: ConcurrentComparator
+Type: Package
+Title: Concurrent Comparator Method at Scale
+Version: 0.1.0
+Date: 2023-10-28
+Authors@R: c(
+        person("Marc", "Suchard", , "msuchard@ucla.edu", role = c("aut", "cre")),
+        person("Patrick", "Ryan", role = c("aut"))
+        )
+Maintainer: Marc Suchard <msuchard@ucla.edu>
+Description: Functions for performing concurrent comparator studies
+    in an observational database in the OMOP Common Data Model.  Can
+    extract the necessary data from a database and uses 'Cyclops' to
+    fit the conditional Poisson outcome model.  The concurrent comparator
+    method is based on ideas presented in (list publications here).
+License: Apache License 2.0
+Encoding: UTF-8
+LazyData: true
+Depends:
+    R (>= 4.2.3),
+    DatabaseConnector (>= 6.0.0),
+    Cyclops (>= 3.1.2)
+Suggests:
+    testthat,
+    Eunomia
