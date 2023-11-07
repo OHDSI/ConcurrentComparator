@@ -90,8 +90,9 @@ getDbConcurrentComparatorData <- function() {
 getDbConcurrentComparatorData <- function(connectionDetails,
                                   cdmDatabaseSchema,
                                   tempEmulationSchema = getOption("sqlRenderTempEmulationSchema"),
-                                  targetId,
-                                  comparatorId,
+                                  exposureIds,
+                                  targetId = 1,
+                                  comparatorId = 1,
                                   outcomeIds,
                                   overwriteComparators = FALSE,
                                   studyStartDate = "",
@@ -106,8 +107,9 @@ getDbConcurrentComparatorData <- function(connectionDetails,
     checkmate::assertClass(connectionDetails, "ConnectionDetails", add = errorMessages)
     checkmate::assertCharacter(cdmDatabaseSchema, len = 1, add = errorMessages)
     checkmate::assertCharacter(tempEmulationSchema, len = 1, null.ok = TRUE, add = errorMessages)
-    checkmate::assertInt(targetId, add = errorMessages)
-    checkmate::assertInt(comparatorId, add = errorMessages)
+    checkmate::assertIntegerish(exposureIds, add = errorMessages)
+    checkmate::assertInt(targetId, add = errorMessages) # TODO Remove
+    checkmate::assertInt(comparatorId, add = errorMessages) # TODO Remove
     checkmate::assertIntegerish(outcomeIds, add = errorMessages)
     checkmate::assertCharacter(studyStartDate, len = 1, add = errorMessages)
     checkmate::assertCharacter(studyEndDate, len = 1, add = errorMessages)
@@ -116,7 +118,7 @@ getDbConcurrentComparatorData <- function(connectionDetails,
     checkmate::assertCharacter(outcomeDatabaseSchema, len = 1, add = errorMessages)
     checkmate::assertCharacter(outcomeTable, len = 1, add = errorMessages)
     checkmate::assertInt(timeAtRisk, lower = 1, add = errorMessages)
-    checkmate::assertLogical(overwriteComparators, len = 1, add = errorMessages)
+    checkmate::assertLogical(overwriteComparators, len = 1, add = errorMessages) # TODO Remove
     checkmate::reportAssertions(collection = errorMessages)
 
 
