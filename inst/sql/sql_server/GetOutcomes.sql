@@ -16,12 +16,13 @@ distributed under the License is distributed on an "AS IS" BASIS,
 WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
-************************************************************************/
+**************************************************s**********************/
 
 SELECT DISTINCT matched_cohort.subject_id,
+    matched_cohort.strata_id,
 	outcome.cohort_definition_id AS outcome_id,
 	DATEDIFF(DAY, matched_cohort.cohort_start_date, outcome.cohort_start_date) AS days_to_event,
-	outcome.cohort_start_date
+	outcome.cohort_start_date AS outcome_start_date
 FROM #matched_cohort matched_cohort
 INNER JOIN @outcome_database_schema.@outcome_table outcome
 	ON matched_cohort.subject_id = outcome.subject_id

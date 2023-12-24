@@ -134,9 +134,50 @@ DatabaseConnector::querySqlToAndromeda(connection = connection,
                                        snakeCaseToCamelCase = TRUE)
 
 
-fileName <- "t667_matched.zip"
+fileName <- "t667_matched2.zip"
 Andromeda::saveAndromeda(andromeda, fileName = fileName)
 ParallelLogger::logInfo("Matched cohorts saved to: ", fileName)
 
 DatabaseConnector::disconnect(connection = connection)
+
+andromeda <- Andromeda::loadAndromeda(fileName = fileName)
+names(andromeda)
+
+andromeda$matchedCohort <- andromeda$matchedCohort %>%
+    left_join(andromeda$outcome %>%
+                  select(subjectId, strataId, daysToEvent, outcomeStartDate),
+              by = c("subjectId", "strataId")
+    ) %>%
+    mutate(daysToEvent = ifelse(is.na(daysToEvent),-1, daysToEvent)) %>%
+    mutate(outcome = ifelse(daysToEvent >= 0 & daysToEvent <= timeAtRisk, 1, 0))
+
+sum(andromeda$matchedCohort %>% pull(outcome))
+
+fileName <- "t667_matchedOutcome.zip"
+Andromeda::saveAndromeda(andromeda, fileName = fileName)
+ParallelLogger::logInfo("Matched cohorts saved to: ", fileName)
+
+
+andromeda <- Andromeda::loadAndromeda(fileName = fileName)
+
+andromeda$matchedCohort %>% filter(daysToEvent >= 21,
+                                   daysToEvent <= 30) %>%
+    inner_join(andromeda$strata) %>%
+    collect() %>% mutate(osd = restoreDate(outcomeStartDate)) %>%
+    select(strataId, subjectId, outcome, daysToEvent, osd, cohortStartDate) %>%
+    print(n = 10)
+
+tmp <- andromeda$matchedCohort %>% mutate(dt = format(as.Date(outcomeStartDate)))
+
+noPHI <- andromeda$matchedCohort %>% select(exposureId, strataId, outcome, timeAtRisk)
+write.csv(noPHI, file = "no_phi.csv", quote = FALSE)
+saveRDS(noPHI %>% collect(), file = "no_phi.Rds")
+tmp <- readRDS(file = "no_phi.Rds")
+
+tmp <- noPHI %>% group_by(strataId, exposureId) %>%
+    summarize(outcome = sum(outcome),
+              timeAtRisk = sum(timeAtRisk)) %>%
+    collect()
+
+saveRDS(tmp %>% collect(), file = "no_phi_grouped.Rds")
 
