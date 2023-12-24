@@ -39,12 +39,12 @@ create table #target as
     select c1.cohort_definition_id,
            c1.subject_id,
            c1.cohort_start_date,
-           case when dateadd(day, @time_at_risk, c1.cohort_start_date) > op1.observation_period_end_date
+           case when dateadd(day, @time_at_risk, c1.cohort_start_date) < op1.observation_period_end_date
             then dateadd(day, @time_at_risk, c1.cohort_start_date)
             else op1.observation_period_end_date
            end as cohort_end_date
     from @cohort_database_schema.@cohort_table c1
-    inner join observation_period op1
+    inner join @cdm_database_schema.observation_period op1
     on c1.subject_id = op1.person_id
     and c1.cohort_start_date >= op1.observation_period_start_date
     and c1.cohort_start_date <= op1.observation_period_end_date
@@ -60,14 +60,14 @@ create table #comparator as
     select c1.cohort_definition_id,
            c1.subject_id,
            c1.cohort_start_date,
-           case when dateadd(day, @time_at_risk, c1.cohort_start_date) > op1.observation_period_end_date
-           then dateadd(day, @time_at_risk, c1.cohort_start_date)
-           else op1.observation_period_end_date
+           case when dateadd(day, @time_at_risk, c1.cohort_start_date) < op1.observation_period_end_date
+            then dateadd(day, @time_at_risk, c1.cohort_start_date)
+            else op1.observation_period_end_date
           end as cohort_end_date
     from (
         select cohort_definition_id,
                subject_id,
-               dateadd(day, @delta_time_at_risk, max(cohort_start_date)) as cohort_start_date
+               dateadd(day, @delta_time, max(cohort_start_date)) as cohort_start_date
         from #target
         group by cohort_definition_id, subject_id
     ) c1
@@ -131,7 +131,7 @@ create table #matched_strata as
                         p1.race_concept_id,
                         p1.ethnicity_concept_id
         from #comparator c0
-        inner join person p1
+        inner join @cdm_database_schema.person p1
         on c0.subject_id = p1.person_id
     ) c1
     on s1.cohort_definition_id = c1.cohort_definition_id

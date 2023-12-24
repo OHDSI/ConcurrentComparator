@@ -25,5 +25,6 @@ Imports:
     checkmate
 Suggests:
     testthat,
-    Eunomia
+    Eunomia,
+    CohortGenerator
 RoxygenNote: 7.2.3

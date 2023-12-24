@@ -1,11 +1,25 @@
+rJava::.jinit(parameters="-Xmx8g", force.init = TRUE)
+
 library(CohortGenerator)
 library(CirceR)
 
-generateStats <- FALSE
+cdmDatabaseSchema <- "cdm_optum_ehr_v2247"
+serverSuffix <- "optum_ehr"
+cohortDatabaseSchema <- "scratch_msuchard"
+cohortTable <- "mrna_cohort"
+
+conn <- DatabaseConnector::createConnectionDetails(
+    dbms = "redshift",
+    server = paste0(keyring::key_get("redshiftServer"), "/", !!serverSuffix),
+    port = 5439,
+    user = keyring::key_get("redshiftUser"),
+    password = keyring::key_get("redshiftPassword"),
+    extraSettings = "ssl=true&sslfactory=com.amazon.redshift.ssl.NonValidatingFactory")
 
 info <- list(
 	list(cohortId = 666, cohortName = "Pfizer", fileName = "extras/pfizer.json"),
-	list(cohortId = 677, cohortName = "Moderna", fileName = "extras/moderna.json"))
+	list(cohortId = 667, cohortName = "Moderna", fileName = "extras/moderna.json"),
+	list(cohortId = 668, cohortName = "Myocarditis/pericarditis", fileName = "extras/MyocarditisPericarditis.json"))
 
 cohortDefinitionSet <- do.call(
     rbind,
@@ -14,7 +28,7 @@ cohortDefinitionSet <- do.call(
         cohortExpression <- CirceR::cohortExpressionFromJson(cohortJson)
         cohortSql <- CirceR::buildCohortQuery(cohortExpression,
                                               options = CirceR::createGenerateOptions(
-                                                  generateStats = generateStats))
+                                                  generateStats = FALSE))
         data.frame(
             cohortId = cohort$cohortId,
             cohortName = cohort$cohortName,
@@ -25,15 +39,37 @@ cohortDefinitionSet <- do.call(
     }))
 
 
+cohortTableNames <- CohortGenerator::getCohortTableNames(cohortTable = cohortTable)
+
+CohortGenerator::createCohortTables(connectionDetails = conn,
+                                    cohortDatabaseSchema = cohortDatabaseSchema,
+                                    cohortTableNames = cohortTableNames,
+                                    incremental = TRUE)
+
+CohortGenerator::generateCohortSet(connectionDetails = conn,
+                                   cdmDatabaseSchema = cdmDatabaseSchema,
+                                   cohortDatabaseSchema = cohortDatabaseSchema,
+                                   cohortTableNames = cohortTableNames,
+                                   cohortDefinitionSet = cohortDefinitionSet,
+                                   incremental = TRUE,
+                                   incrementalFolder = ".")
+
+CohortGenerator::getCohortCounts(connectionDetails = conn,
+                                 cohortDatabaseSchema = cohortDatabaseSchema,
+                                 cohortTable = cohortTable)
+
+
+
+
 # test internal parts
 
-cdmDatabaseSchema <- "cdm_database_schema"
-cohortDatabaseSchema <- "scratch"
-cohortTable <- "cc_cohorts"
+# cdmDatabaseSchema <- "cdm_database_schema"
+# cohortDatabaseSchema <- "scratch"
+# cohortTable <- "cc_cohorts"
 timeAtRisk <- 21
 deltaTime <- 22
-dbms <- "sql server"
-cohortIds <- c(1,2)
+dbms <- "redshift"
+cohortIds <- c(666,667)
 
 sql <- SqlRender::loadRenderTranslateSql(sqlFilename = "CohortExtraction.sql",
                                          packageName = "ConcurrentComparator",
@@ -45,3 +81,62 @@ sql <- SqlRender::loadRenderTranslateSql(sqlFilename = "CohortExtraction.sql",
                                          delta_time = deltaTime,
                                          cohort_ids = cohortIds,
                                          warnOnMissingParameters = TRUE)
+
+connection <- DatabaseConnector::connect(conn)
+
+ParallelLogger::logInfo("Creating matched cohorts in database")
+DatabaseConnector::executeSql(connection = connection, sql = sql)
+
+# DatabaseConnector::executeSql(connection = connection,
+#                               sql = "SELECT * INTO scratch_msuchard.mrna_matched_cohort FROM #matched_cohort")
+
+# DatabaseConnector::querySql(connection = connection,
+#                            sql = "SELECT COUNT(subject_id) FROM #matched_cohort")
+
+andromeda <- Andromeda::andromeda()
+
+ParallelLogger::logInfo("Pulling matched cohorts down to local system")
+DatabaseConnector::querySqlToAndromeda(connection = connection,
+                                       sql = "SELECT * FROM #strata WHERE cohort_definition_id = 667",
+                                       andromeda = andromeda,
+                                       andromedaTableName = "strata",
+                                       snakeCaseToCamelCase = TRUE)
+
+sql <- "
+SELECT exposure_id,
+       strata_id,
+       subject_id,
+       DATEDIFF(DAY, cohort_start_date, cohort_end_date) AS time_at_risk
+FROM #matched_cohort
+WHERE cohort_definition_id = 667
+"
+
+DatabaseConnector::querySqlToAndromeda(connection = connection,
+                                       sql = sql,
+                                       andromeda = andromeda,
+                                       andromedaTableName = "matchedCohort",
+                                       snakeCaseToCamelCase = TRUE)
+
+
+sql <- SqlRender::loadRenderTranslateSql(sqlFilename = "GetOutcomes.sql",
+                                         packageName = "ConcurrentComparator",
+                                         dbms = dbms,
+                                         outcome_database_schema = cohortDatabaseSchema,
+                                         outcome_table = cohortTable,
+                                         outcome_ids = 668,
+                                         exposure_ids = 667,
+                                         warnOnMissingParameters = TRUE)
+
+DatabaseConnector::querySqlToAndromeda(connection = connection,
+                                       sql = sql,
+                                       andromeda = andromeda,
+                                       andromedaTableName = "outcome",
+                                       snakeCaseToCamelCase = TRUE)
+
+
+fileName <- "t667_matched.zip"
+Andromeda::saveAndromeda(andromeda, fileName = fileName)
+ParallelLogger::logInfo("Matched cohorts saved to: ", fileName)
+
+DatabaseConnector::disconnect(connection = connection)
+
