@@ -21,6 +21,7 @@ limitations under the License.
 SELECT DISTINCT matched_cohort.subject_id,
     matched_cohort.strata_id,
 	outcome.cohort_definition_id AS outcome_id,
+	matched_cohort.cohort_start_date AS cohort_start_date,
 	DATEDIFF(DAY, matched_cohort.cohort_start_date, outcome.cohort_start_date) AS days_to_event,
 	outcome.cohort_start_date AS outcome_start_date
 FROM #matched_cohort matched_cohort
