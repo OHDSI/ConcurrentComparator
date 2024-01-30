@@ -2,6 +2,7 @@ rJava::.jinit(parameters="-Xmx8g", force.init = TRUE)
 
 library(CohortGenerator)
 library(CirceR)
+library(Andromeda)
 
 cdmDatabaseSchema <- "cdm_optum_ehr_v2247"
 serverSuffix <- "optum_ehr"
@@ -66,7 +67,8 @@ CohortGenerator::getCohortCounts(connectionDetails = conn,
 # cdmDatabaseSchema <- "cdm_database_schema"
 # cohortDatabaseSchema <- "scratch"
 # cohortTable <- "cc_cohorts"
-timeAtRisk <- 21
+timeAtRiskStart <- 1
+timeAtRiskEnd <- 21
 deltaTime <- 22
 dbms <- "redshift"
 cohortIds <- c(666,667)
@@ -77,7 +79,7 @@ sql <- SqlRender::loadRenderTranslateSql(sqlFilename = "CohortExtraction.sql",
                                          cdm_database_schema = cdmDatabaseSchema,
                                          cohort_database_schema = cohortDatabaseSchema,
                                          cohort_table = cohortTable,
-                                         time_at_risk = timeAtRisk,
+                                         time_at_risk = timeAtRiskEnd,
                                          delta_time = deltaTime,
                                          cohort_ids = cohortIds,
                                          warnOnMissingParameters = TRUE)
@@ -106,6 +108,7 @@ sql <- "
 SELECT exposure_id,
        strata_id,
        subject_id,
+       cohort_start_date,
        DATEDIFF(DAY, cohort_start_date, cohort_end_date) AS time_at_risk
 FROM #matched_cohort
 WHERE cohort_definition_id = 667
@@ -134,7 +137,7 @@ DatabaseConnector::querySqlToAndromeda(connection = connection,
                                        snakeCaseToCamelCase = TRUE)
 
 
-fileName <- "t667_matched2.zip"
+fileName <- "t667_matched3.zip"
 Andromeda::saveAndromeda(andromeda, fileName = fileName)
 ParallelLogger::logInfo("Matched cohorts saved to: ", fileName)
 
@@ -143,29 +146,97 @@ DatabaseConnector::disconnect(connection = connection)
 andromeda <- Andromeda::loadAndromeda(fileName = fileName)
 names(andromeda)
 
+# set end date
+endDate <- "2021-06-30"
 andromeda$matchedCohort <- andromeda$matchedCohort %>%
-    left_join(andromeda$outcome %>%
-                  select(subjectId, strataId, daysToEvent, outcomeStartDate),
-              by = c("subjectId", "strataId")
+    mutate(csd = cohortStartDate) %>%
+    collect() %>%
+    mutate(truncate = Andromeda::restoreDate(cohortStartDate) > as.Date(endDate))
+
+# check matched cohort
+
+# max times subject in T or C
+andromeda$matchedCohort %>% group_by(subjectId) %>%
+    mutate(count = n()) %>% arrange(-count)
+
+# max times subject in C
+andromeda$matchedCohort %>% filter(exposureId == 0) %>% group_by(subjectId) %>%
+    mutate(count = n()) %>% arrange(-count)
+
+# truncate by study end date
+andromeda$matchedCohort <- andromeda$matchedCohort %>%
+    filter(truncate == 0) %>% select(-truncate) %>%
+    collect() %>%
+    mutate(csd = as.Date(cohortStartDate))
+
+# max times subject in T or C
+andromeda$matchedCohort %>% group_by(subjectId) %>%
+    mutate(count = n()) %>% arrange(-count)
+
+# max times subject in C
+andromeda$matchedCohort %>% filter(exposureId == 0) %>% group_by(subjectId) %>%
+    mutate(count = n()) %>% arrange(-count)
+
+## END DEBUG
+
+andromeda$matchedCohort %>% group_by(exposureId) %>%
+    summarise(entries = n(),
+              subjects = n_distinct(subjectId))
+
+# exposureId entries subjects
+# <dbl>   <int>    <int>
+# 1          0  789372   789372
+# 2          1 1442798   824328
+
+
+# Add outcomes
+
+intersection <- andromeda$matchedCohort %>%
+    inner_join(andromeda$outcome %>%
+                  select(subjectId, strataId, cohortStartDate, daysToEvent, outcomeStartDate),
+              by = c("subjectId", "strataId", "cohortStartDate")
     ) %>%
-    mutate(daysToEvent = ifelse(is.na(daysToEvent),-1, daysToEvent)) %>%
-    mutate(outcome = ifelse(daysToEvent >= 0 & daysToEvent <= timeAtRisk, 1, 0))
+    filter(daysToEvent >= timeAtRiskStart,
+           daysToEvent <= timeAtRiskEnd) %>%
+    mutate(outcome = 1)
 
-sum(andromeda$matchedCohort %>% pull(outcome))
 
-fileName <- "t667_matchedOutcome.zip"
+andromeda$matchedCohort <- andromeda$matchedCohort %>%
+    left_join(intersection %>%
+                  select(exposureId, subjectId, strataId, cohortStartDate, outcome, outcomeStartDate, daysToEvent),
+              by = c("exposureId", "subjectId", "strataId", "cohortStartDate")
+    ) %>%
+    mutate(outcome = ifelse(is.na(outcome), 0, outcome))
+
+# andromeda$matchedCohort %>% filter(outcome == 1) %>% collect() %>%
+#     mutate(outcomeStartDate = Andromeda::restoreDate(outcomeStartDate),
+#            csd = Andromeda::restoreDate(csd))
+
+# Summary statistics
+
+andromeda$matchedCohort %>% group_by(exposureId) %>%
+    summarise(entries = n(),
+              subjects = n_distinct(subjectId),
+              outcomes = sum(outcome),
+              kPtYrs = sum(timeAtRisk / 365.25 / 1000))
+
+# exposureId entries subjects outcomes kPtYrs
+# <dbl>   <int>    <int>    <dbl>  <dbl>
+# 1          0  789372   789372       22   41.8
+# 2          1 1442798   824328       52   82.9
+
+fileName <- "t667_matchedOutcome3.zip"
 Andromeda::saveAndromeda(andromeda, fileName = fileName)
 ParallelLogger::logInfo("Matched cohorts saved to: ", fileName)
 
 
 andromeda <- Andromeda::loadAndromeda(fileName = fileName)
 
-andromeda$matchedCohort %>% filter(daysToEvent >= 21,
-                                   daysToEvent <= 30) %>%
-    inner_join(andromeda$strata) %>%
-    collect() %>% mutate(osd = restoreDate(outcomeStartDate)) %>%
-    select(strataId, subjectId, outcome, daysToEvent, osd, cohortStartDate) %>%
-    print(n = 10)
+
+andromeda$matchedCohort %>% group_by(subjectId) %>%
+    mutate(count = n()) %>% arrange(-count)
+
+length(andromeda$matchedCohort %>% pull(exposureId))
 
 tmp <- andromeda$matchedCohort %>% mutate(dt = format(as.Date(outcomeStartDate)))
 
