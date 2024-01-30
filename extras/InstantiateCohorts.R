@@ -181,3 +181,52 @@ tmp <- noPHI %>% group_by(strataId, exposureId) %>%
 
 saveRDS(tmp %>% collect(), file = "no_phi_grouped.Rds")
 
+
+
+###
+
+matchedCohort <- readRDS("extras/no_phi_subjects.Rds") %>%
+    filter(timeAtRisk > 0) %>%
+    mutate(timeAtRisk = timeAtRisk / 365.25 / 1000.0,
+           logTimeAtRisk = log(timeAtRisk))
+
+groupedMatchedCohort <- readRDS("extras/no_phi_grouped.Rds") %>%
+    filter(timeAtRisk > 0) %>%
+    mutate(timeAtRisk = timeAtRisk / 365.25 / 1000.0,
+           logTimeAtRisk = log(timeAtRisk))
+
+matchedCohort %>% group_by(exposureId) %>%
+    summarize(t1 = sum(outcome),
+              t2 = sum(timeAtRisk),
+              rate = t1 / t2)
+
+library(Cyclops)
+library(survival)
+library(gnm)
+
+cyclopsData <- createCyclopsData(outcome ~ exposureId + strata(strataId) + offset(logTimeAtRisk),
+                                 data = matchedCohort,
+                                 modelType = "cpr")
+
+fit <- fitCyclopsModel(cyclopsData = cyclopsData)
+coef(fit)
+confint(fit, parm = "exposureId")
+
+cyclopsData <- createCyclopsData(outcome ~ exposureId + strata(strataId) + offset(logTimeAtRisk),
+                                 data = groupedMatchedCohort,
+                                 modelType = "cpr")
+
+fit <- fitCyclopsModel(cyclopsData = cyclopsData)
+coef(fit)
+confint(fit, parm = "exposureId")
+
+
+
+# gold <- gnm(outcome ~ exposureId + strata(strataId) + offset(logTimeAtRisk),
+#             family = poisson,
+#             data = groupedMatchedCohort)
+#
+# gold <- glm(outcome ~  exposureId,
+#
+#             # offset = timeAtRisk,
+#             data = groupedMatchedCohort, family = poisson())
