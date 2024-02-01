@@ -14,6 +14,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+getAggregatedPopulation <- function(population) {
+    return(population)
+}
+
+
 #' Create an outcome model, and compute the relative risk
 #'
 #' @details
@@ -41,31 +46,124 @@
 #' An object of class `OutcomeModel`. Generic function `print`, `coef`, and
 #' `confint` are available.
 #'
+#' @importFrom survival strata
+#'
 #' @export
 fitOutcomeModel <- function(population,
-                            modelType = "cpr",
+                            stratified = TRUE,
                             profileGrid = NULL,
                             profileBounds = c(log(0.1), log(10)),
-                            prior = createPrior("laplace", useCrossValidation = TRUE),
-                            control = createControl(
-                                cvType = "auto",
-                                seed = 1,
-                                resetCoefficients = TRUE,
-                                startingVariance = 0.01,
-                                tolerance = 2e-07,
-                                cvRepetitions = 10,
-                                noiseLevel = "quiet"
-                            )) {
+                            timeScale = 365.25 * 1000
+                            # prior = createPrior("laplace", useCrossValidation = TRUE),
+                            # control = createControl(
+                            #     cvType = "auto",
+                            #     seed = 1,
+                            #     resetCoefficients = TRUE,
+                            #     startingVariance = 0.01,
+                            #     tolerance = 2e-07,
+                            #     cvRepetitions = 10,
+                            #     noiseLevel = "quiet"
+                            # )
+                            ) {
     errorMessages <- checkmate::makeAssertCollection()
     checkmate::assertDataFrame(population, null.ok = TRUE, add = errorMessages)
-    checkmate::assertChoice(modelType, c("cpr", "poisson", "cox"), add = errorMessages)
+    checkmate::assertLogical(stratified, add = errorMessages)
     checkmate::assertNumeric(profileGrid, null.ok = TRUE, add = errorMessages)
     checkmate::assertNumeric(profileBounds, null.ok = TRUE, len = 2, add = errorMessages)
-    checkmate::assertClass(prior, "cyclopsPrior", add = errorMessages)
-    checkmate::assertClass(control, "cyclopsControl", add = errorMessages)
+    checkmate::assertNumber(timeScale, lower = 0, add = errorMessages)
     checkmate::reportAssertions(collection = errorMessages)
 
-    return(NULL)
+    start <- Sys.time()
+
+    coefficients <- NULL
+    treatmentEstimate <- NULL
+    logLikelihood <- NA
+    logLikelihoodProfile <- NULL
+    status <- "NO MODEL FITTED"
+    metaData <- attr(population, "metaData")
+
+    pop <- getAggregatedPopulation(population %>%
+                                       mutate(logTimeAtRisk = log(timeAtRisk / timeScale)))
+
+    if (sum(pop$y) == 0) {
+        status <- "NO OUTCOMES"
+    } else {
+
+        if (stratified) {
+            cyclopsData <- Cyclops::createCyclopsData(
+                y ~ exposureId + strata(strataId) + offset(logTimeAtRisk),
+                data = pop,
+                modelType = "cpr")
+        } else {
+            cyclopsData <- Cyclops::createCyclopsData(
+                y ~ exposureId + offset(logTimeAtRisk),
+                data = pop,
+                modelType = "pr")
+        }
+
+        fit <- tryCatch(
+            {
+                Cyclops::fitCyclopsModel(cyclopsData)
+            },
+            error = function(e) { e$message })
+        if (is.character(fit)) {
+            status <- fit
+        } else {
+            # Retrieve likelihood profile
+            if (!is.null(profileGrid) || !is.null(profileBounds)) {
+                logLikelihoodProfile <- Cyclops::getCyclopsProfileLogLikelihood(
+                    object = fit,
+                    parm = "exposureId",
+                    x = profileGrid,
+                    bounds = profileBounds,
+                    tolerance = 0.1,
+                    includePenalty = TRUE
+                )
+            }
+            if (fit$return_flag != "SUCCESS") {
+                status <- fit$return_flag
+            } else {
+                status <- "OK"
+                coefficients <- coef(fit)
+                logRr <- coef(fit)[names(coef(fit)) == "exposureId"]
+                ci <- tryCatch(
+                    {
+                        confint(fit, parm = "exposureId", includePenalty = TRUE)
+                    },
+                    error = function(e) {
+                        missing(e) # suppresses R CMD check note
+                        c(0, -Inf, Inf)
+                    }
+                )
+                if (identical(ci, c(0, -Inf, Inf))) {
+                    status <- "ERROR COMPUTING CI"
+                }
+                seLogRr <- (ci[3] - ci[2]) / (2 * qnorm(0.975))
+
+                treatmentEstimate <- tibble(
+                    logRr = logRr,
+                    logLb95 = ci[2],
+                    logUb95 = ci[3],
+                    seLogRr = seLogRr
+                )
+            }
+
+        }
+    }
+
+    outcomeModel <- metaData
+    outcomeModel$treatmentEstimate <- treatmentEstimate
+    outcomeModel$coefficients <- coefficients
+    outcomeModel$logLikelihoodProfile <- logLikelihoodProfile
+    outcomeModel$stratified <- stratified
+    outcomeModel$status <- status
+
+    class(outcomeModel) <- "OutcomeModel"
+    delta <- Sys.time() - start
+    message(paste("Fitting outcome model took", signif(delta, 3), attr(delta, "units")))
+    ParallelLogger::logDebug("Outcome model fitting status is: ", status)
+
+    return(outcomeModel)
 }
 
 #' Create a study population
@@ -79,21 +177,45 @@ fitOutcomeModel <- function(population,
 #' @return
 #' A `tibble` specifying the study population. This `tibble` will have the following columns:
 #'
-#' - `rowId`: A unique identifier for an exposure.
-#' - `personSeqId`: The person sequence ID of the subject.
+#' - `subjectId`: The person sequence ID of the subject.
+#' - `strataId` : The person's stratum
+#' - `exposureId` : 1 == target; 0 == comparator
 #' - `cohortStartdate`: The index date.
 #' - `outcomeCount` The number of outcomes observed during the risk window.
 #' - `timeAtRisk`: The number of days in the risk window.
-#' - `survivalTime`: The number of days until either the outcome or the end of the risk window.
+#' - `daysToEvent` : The number of days from cohortStartDate on which outcome occurs
 #'
 #' @export
-createStudyPopulation <- function(ConcurrentComparatorData,
+createStudyPopulation <- function(concurrentComparatorData,
                                   outcomeId) {
     errorMessages <- checkmate::makeAssertCollection()
-    checkmate::assertClass(concurrentComparatorData, "concurrentComparatorData", add = errorMessages)
-    checkmate::assertInt(outcomeId, len = 1, add = errorMessages)
+    checkmate::assertClass(concurrentComparatorData, "ConcurrentComparatorData", add = errorMessages)
+    checkmate::assertInt(outcomeId, add = errorMessages)
     checkmate::reportAssertions(collection = errorMessages)
 
-    return(NULL)
+    outcomeMatchedCohort <- concurrentComparatorData$matchedCohort %>%
+        left_join(concurrentComparatorData$allOutcomes %>% filter(outcomeId == !!outcomeId) %>%
+                      select(subjectId, strataId, y, daysToEvent),
+                  by = c("subjectId", "strataId")
+        ) %>%
+        mutate(y = ifelse(is.na(y), 0, y))
+
+    # Summary statistics
+    outcomeStatistics <- outcomeMatchedCohort %>% group_by(exposureId) %>%
+        summarise(entries = n(),
+                  subjects = n_distinct(subjectId),
+                  outcomes = sum(y),
+                  kPtYrs = sum(timeAtRisk / 365.25 / 1000)) %>%
+        as_tibble()
+
+    outcomeMatchedCohort <- outcomeMatchedCohort %>% collect()
+
+    attr(outcomeMatchedCohort, "metaData") <- list(
+        targetId = attr(concurrentComparatorData, "metaData")$targetId,
+        outcomeId = outcomeId,
+        outcomeStatistics = outcomeStatistics
+    )
+
+    return(outcomeMatchedCohort)
 }
 
