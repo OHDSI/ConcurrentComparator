@@ -1,5 +1,4 @@
 rJava::.jinit(parameters="-Xmx8g", force.init = TRUE)
-library(ConcurrentComparator)
 
 # TODO: Turn this document into a package vignette
 
@@ -64,8 +63,33 @@ CohortGenerator::getCohortCounts(connectionDetails = conn,
                                  cohortDatabaseSchema = cohortDatabaseSchema,
                                  cohortTable = cohortTable)
 
-# Run CC manually
-timeAtRiskStart <- 1
-timeAtRiskEnd <- 21
-deltaTime <- 22
-cohortIds <- c(666,667)
+###################### Package usage ####################
+
+library(ConcurrentComparator)
+
+# Run single CC analysis
+
+ccData <- getDbConcurrentComparatorData(connectionDetails = conn,
+                                        cdmDatabaseSchema = cdmDatabaseSchema,
+                                        targetId = 667,
+                                        outcomeIds = 668,
+                                        studyEndDate = "2021-06-30",
+                                        exposureDatabaseSchema = cohortDatabaseSchema,
+                                        exposureTable = cohortTable,
+                                        outcomeDatabaseSchema = cohortDatabaseSchema,
+                                        outcomeTable = cohortTable,
+                                        timeAtRiskStart = 1,
+                                        timeAtRiskEnd = 21,
+                                        washoutTime = 22)
+
+saveConcurrentComparatorData(ccData, "t667_o668.zip")
+ccData <- loadConcurrentComparatorData("t667_o668.zip")
+
+population <- createStudyPopulation(ccData, outcomeId = 668)
+
+fit <- fitOutcomeModel(population = population)
+
+fit
+
+# Run multiple CC analyses
+
