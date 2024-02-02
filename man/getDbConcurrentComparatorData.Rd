@@ -8,8 +8,7 @@ getDbConcurrentComparatorData(
   connectionDetails,
   cdmDatabaseSchema,
   tempEmulationSchema = getOption("sqlRenderTempEmulationSchema"),
-  targetId,
-  comparatorId,
+  targetId = 1,
   outcomeIds,
   overwriteComparators = FALSE,
   studyStartDate = "",
@@ -18,7 +17,10 @@ getDbConcurrentComparatorData(
   exposureTable,
   outcomeDatabaseSchema = cdmDatabaseSchema,
   outcomeTable,
-  timeAtRisk
+  timeAtRiskStart,
+  timeAtRiskEnd,
+  washoutTime = timeAtRiskEnd + 1,
+  intermediateFileNameStem = NULL
 )
 }
 \arguments{
@@ -36,10 +38,6 @@ so for example 'cdm_instance.dbo'.}
 
 \item{targetId}{A unique identifier to define the target cohort. targetId is
 used to select the COHORT_DEFINITION_ID in the cohort-like table.}
-
-\item{comparatorId}{A unique identifier to define the comparator cohort. comparatorId
-is used to select the COHORT_DEFINITION_ID in the cohort-like
-table. TODO UPDATE}
 
 \item{outcomeIds}{A list of cohort IDs used to define outcomes.}
 
@@ -67,7 +65,15 @@ data used to define the outcome cohorts is available.}
 \item{outcomeTable}{The tablename that contains the outcome cohorts has the format of a COHORT table: COHORT_DEFINITION_ID,
 SUBJECT_ID, COHORT_START_DATE, COHORT_END_DATE.}
 
-\item{timeAtRisk}{The time-at-risk duration in days after subject index date.}
+\item{timeAtRiskStart}{The time-at-risk start in days after subject index date.}
+
+\item{timeAtRiskEnd}{The time-at-risk end in days after subject index date.}
+
+\item{washoutTime}{Washout time in days between target and comparator periods}
+
+\item{comparatorId}{A unique identifier to define the comparator cohort. comparatorId
+is used to select the COHORT_DEFINITION_ID in the cohort-like
+table. TODO UPDATE}
 }
 \value{
 A [ConcurrentComparatorData] object.

@@ -34,6 +34,26 @@ createConcurrentComparatorAnalysis <- function(analysisId = 1,
 }
 
 #' @export
+aggreagateConcurrentComparatorResults <- function(results,
+                                                  outputFolder = "./ConcurrentComparatorOutput") {
+
+    table <- do.call(rbind,
+            lapply(results, function(fileName) {
+                tmp <- readRDS(fileName)
+
+                list(
+                    analysisId = tmp$analysisId,
+                    targetId = tmp$targetId,
+                    outcomeId = tmp$outcomeId,
+                    estimate = tmp$treatmentEstimate$logRr,
+                    control = tmp$controlValue
+                )
+            }))
+
+    return(table)
+}
+
+#' @export
 runConcurrentComparatorAnalyses <- function(connectionDetails,
                                             cdmDatabaseSchema,
                                             tempEmulationSchema = getOption("sqlRenderTempEmulationSchema"),
@@ -43,16 +63,22 @@ runConcurrentComparatorAnalyses <- function(connectionDetails,
                                             outcomeTable,
                                             outputFolder = "./ConcurrentComparatorOutput",
                                             analysisList,
-                                            targetList,
+                                            targetIds,
                                             outcomeIds,
                                             controlIds,
-                                            cdmVersion = "5",
-                                            analysesToExclude) {
+                                            cdmVersion = "5") {
+
+    results <- NULL
+
+    outputFolder <- normalizePath(outputFolder, mustWork = FALSE)
+    if (!file.exists(outputFolder)) {
+        dir.create(outputFolder)
+    }
 
     lapply(analysisList, function(analysis) {
         ParallelLogger::logInfo("Starting analysis ", analysis$analysisId)
 
-        lapply(targetList, function(targetId) {
+        lapply(targetIds, function(targetId) {
 
             fileStem <- file.path(outputFolder,
                                   paste0("a", analysis$analysisId, "_",
@@ -75,22 +101,27 @@ runConcurrentComparatorAnalyses <- function(connectionDetails,
                         timeAtRiskStart = analysis$timeAtRiskStart,
                         timeAtRiskEnd = analysis$timeAtRiskEnd,
                         washoutTime = analysis$washoutTime)
-                    saveAndromeda(ccData, fileName = fileName)
+                    saveAndromeda(ccData, fileName)
                 }
 
-                ccData <- loadConcurrentComparatorData(fileName = fileName)
+                ccData <- loadConcurrentComparatorData(fileName)
 
                 lapply(outcomeIds, function(outcomeId) {
 
-                    fileName <- paste0(filestem, "o", outcomeId, ".Rds")
+                    fileName <- paste0(fileStem, "o", outcomeId, ".Rds")
                     if (!file.exists(fileName)) {
 
                         population = createStudyPopulation(ccData,
                                                            outcomeId = outcomeId)
 
                         fit <- fitOutcomeModel(population = population)
+                        fit$analysisId <- analysis$analysisId
+                        fit$controlValue <- NA
+
                         saveRDS(fit, fileName)
                     }
+
+                    results <<- c(results, fileName)
                 })
 
                 close(ccData)
@@ -115,22 +146,27 @@ runConcurrentComparatorAnalyses <- function(connectionDetails,
                         timeAtRiskStart = analysis$timeAtRiskStart,
                         timeAtRiskEnd = analysis$timeAtRiskEnd,
                         washoutTime = analysis$washoutTime)
-                    saveAndromeda(ccData, fileName = fileName)
+                    saveAndromeda(ccData, fileName)
                 }
 
-                ccData <- loadConcurrentComparatorData(fileName = fileName)
+                ccData <- loadConcurrentComparatorData(fileName)
 
                 lapply(controlIds, function(outcomeId) { # X
 
-                    fileName <- paste0(filestem, "c", outcomeId, ".Rds") # X
+                    fileName <- paste0(fileStem, "c", outcomeId, ".Rds") # X
                     if (!file.exists(fileName)) {
 
                         population = createStudyPopulation(ccData,
                                                            outcomeId = outcomeId)
 
                         fit <- fitOutcomeModel(population = population)
+                        fit$analysisId <- analysis$analysisId
+                        fit$controlValue <- 0
+
                         saveRDS(fit, fileName)
                     }
+
+                    results <<- c(results, fileName)
                 })
 
                 close(ccData)
@@ -138,4 +174,5 @@ runConcurrentComparatorAnalyses <- function(connectionDetails,
         })
     })
 
+    return(results)
 }

@@ -4,23 +4,24 @@
 \alias{createStudyPopulation}
 \title{Create a study population}
 \usage{
-createStudyPopulation(ConcurrentComparatorData, outcomeId)
+createStudyPopulation(concurrentComparatorData, outcomeId)
 }
 \arguments{
-\item{outcomeId}{The ID of the outcome.}
-
 \item{concurrentComparatorData}{An object of type [ConcurrentComparatorData] as created using the
 [getDbConcurrentComparatorData] function.}
+
+\item{outcomeId}{The ID of the outcome.}
 }
 \value{
 A `tibble` specifying the study population. This `tibble` will have the following columns:
 
-- `rowId`: A unique identifier for an exposure.
-- `personSeqId`: The person sequence ID of the subject.
+- `subjectId`: The person sequence ID of the subject.
+- `strataId` : The person's stratum
+- `exposureId` : 1 == target; 0 == comparator
 - `cohortStartdate`: The index date.
 - `outcomeCount` The number of outcomes observed during the risk window.
 - `timeAtRisk`: The number of days in the risk window.
-- `survivalTime`: The number of days until either the outcome or the end of the risk window.
+- `daysToEvent` : The number of days from cohortStartDate on which outcome occurs
 }
 \description{
 Create a study population

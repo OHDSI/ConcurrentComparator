@@ -18,9 +18,9 @@ conn <- DatabaseConnector::createConnectionDetails(
     extraSettings = "ssl=true&sslfactory=com.amazon.redshift.ssl.NonValidatingFactory")
 
 info <- list(
-	list(cohortId = 666, cohortName = "Pfizer", fileName = "extras/pfizer.json"),
-	list(cohortId = 667, cohortName = "Moderna", fileName = "extras/moderna.json"),
-	list(cohortId = 668, cohortName = "Myocarditis/pericarditis", fileName = "extras/MyocarditisPericarditis.json"))
+	list(cohortId = 666, cohortName = "Pfizer", fileName = "extras/t666.json"),
+	list(cohortId = 667, cohortName = "Moderna", fileName = "extras/t667.json"),
+	list(cohortId = 668, cohortName = "Myocarditis/pericarditis", fileName = "extras/o668.json"))
 
 cohortDefinitionSet <- do.call(
     rbind,
@@ -88,6 +88,39 @@ ccData$matchedCohort %>% filter(exposureId == 0) %>% group_by(subjectId) %>%
 population <- createStudyPopulation(ccData, outcomeId = 668)
 
 fit <- fitOutcomeModel(population = population)
+
+
+### multiple run
+
+analysisList <- list(
+    createConcurrentComparatorAnalysis(analysisId = 1,
+                                       studyEndDate = "2021-06-30",
+                                       timeAtRiskStart = 1,
+                                       timeAtRiskEnd = 21,
+                                       washoutTime = 22),
+    createConcurrentComparatorAnalysis(analysisId = 2,
+                                       studyEndDate = "2021-06-30",
+                                       timeAtRiskStart = 0,
+                                       timeAtRiskEnd = 7, # WORKING? NEED TEST
+                                       washoutTime = 36)  # WORKING? NEED TEST
+)
+
+
+outputFolder <- "./ConcurrentComparatorOutput"
+results <- runConcurrentComparatorAnalyses(connectionDetails = conn,
+                                cdmDatabaseSchema = cdmDatabaseSchema,
+                                exposureDatabaseSchema = cohortDatabaseSchema,
+                                exposureTable = cohortTable,
+                                outcomeDatabaseSchema = cohortDatabaseSchema,
+                                outcomeTable = cohortTable,
+                                outputFolder = outputFolder,
+                                analysisList = analysisList,
+                                targetIds = c(667),
+                                outcomeIds = c(668),
+                                controlIds = c(74816))
+
+aggreagateConcurrentComparatorResults(results, outputFolder)
+
 
 ### OLD MATERIAL BELOW
 

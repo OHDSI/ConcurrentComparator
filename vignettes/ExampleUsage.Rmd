@@ -1,0 +1,142 @@
+---
+title: "`ConcurrentComparator` Example Usage"
+author: "Marc A. Suchard"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+rJava::.jinit(parameters="-Xmx8g", force.init = TRUE)
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Generate target and outcome cohorts
+
+First instantiation takes a long time (many 10s of minutes) but cohorts are cached from run to run
+
+```{r generate_cohorts, message=FALSE}
+library(CohortGenerator)
+library(CirceR)
+library(Andromeda)
+
+# Set up connection details
+cdmDatabaseSchema <- "cdm_optum_ehr_v2247"
+serverSuffix <- "optum_ehr"
+cohortDatabaseSchema <- "scratch_msuchard"
+cohortTable <- "mrna_cohort"
+
+conn <- DatabaseConnector::createConnectionDetails(
+    dbms = "redshift",
+    server = paste0(keyring::key_get("redshiftServer"), "/", !!serverSuffix),
+    port = 5439,
+    user = keyring::key_get("redshiftUser"),
+    password = keyring::key_get("redshiftPassword"),
+    extraSettings = "ssl=true&sslfactory=com.amazon.redshift.ssl.NonValidatingFactory")
+
+# Generate target and outcome cohorts onto `cohortDatabaseSchema.cohortTable`
+info <- list(
+	list(cohortId = 666, cohortName = "T666", fileName = "../extras/t666.json"),
+	list(cohortId = 667, cohortName = "T667", fileName = "../extras/t667.json"),
+	list(cohortId = 668, cohortName = "T668", fileName = "../extras/o668.json"))
+
+cohortDefinitionSet <- do.call(
+    rbind,
+    lapply(info, function(cohort) {
+        cohortJson <- readChar(cohort$fileName, file.info(cohort$fileName)$size)
+        cohortExpression <- CirceR::cohortExpressionFromJson(cohortJson)
+        cohortSql <- CirceR::buildCohortQuery(cohortExpression,
+                                              options = CirceR::createGenerateOptions(
+                                                  generateStats = FALSE))
+        data.frame(
+            cohortId = cohort$cohortId,
+            cohortName = cohort$cohortName,
+            sql = cohortSql,
+            json = cohortJson,
+            stringsAsFactors = FALSE
+        )
+    }))
+
+cohortTableNames <- CohortGenerator::getCohortTableNames(cohortTable = cohortTable)
+
+CohortGenerator::createCohortTables(connectionDetails = conn,
+                                    cohortDatabaseSchema = cohortDatabaseSchema,
+                                    cohortTableNames = cohortTableNames,
+                                    incremental = TRUE)
+
+CohortGenerator::generateCohortSet(connectionDetails = conn,
+                                   cdmDatabaseSchema = cdmDatabaseSchema,
+                                   cohortDatabaseSchema = cohortDatabaseSchema,
+                                   cohortTableNames = cohortTableNames,
+                                   cohortDefinitionSet = cohortDefinitionSet,
+                                   incremental = TRUE,
+                                   incrementalFolder = ".")
+
+CohortGenerator::getCohortCounts(connectionDetails = conn,
+                                 cohortDatabaseSchema = cohortDatabaseSchema,
+                                 cohortTable = cohortTable)
+
+```
+
+## Package usage
+
+### Single CC analysis
+
+```{r package_usage_single}
+library(ConcurrentComparator)
+
+ccData <- getDbConcurrentComparatorData(connectionDetails = conn,
+                                        cdmDatabaseSchema = cdmDatabaseSchema,
+                                        targetId = 667,
+                                        outcomeIds = 668,
+                                        studyEndDate = "2021-06-30",
+                                        exposureDatabaseSchema = cohortDatabaseSchema,
+                                        exposureTable = cohortTable,
+                                        outcomeDatabaseSchema = cohortDatabaseSchema,
+                                        outcomeTable = cohortTable,
+                                        timeAtRiskStart = 1,
+                                        timeAtRiskEnd = 21,
+                                        washoutTime = 22)
+
+saveConcurrentComparatorData(ccData, "t667_o668.zip")
+ccData <- loadConcurrentComparatorData("t667_o668.zip")
+
+population <- createStudyPopulation(ccData, outcomeId = 668)
+
+fit <- fitOutcomeModel(population = population)
+
+fit
+```
+
+### Multiple CC analyses
+
+```{r package_usage_multiple}
+analysisList <- list(
+    createConcurrentComparatorAnalysis(analysisId = 1,
+                                       studyEndDate = "2021-06-30",
+                                       timeAtRiskStart = 1,
+                                       timeAtRiskEnd = 21,
+                                       washoutTime = 22),
+    createConcurrentComparatorAnalysis(analysisId = 2,
+                                       studyEndDate = "2021-06-30",
+                                       timeAtRiskStart = 0,
+                                       timeAtRiskEnd = 7, # WORKING? NEED TEST
+                                       washoutTime = 36)  # WORKING? NEED TEST
+)
+
+
+outputFolder <- "./ConcurrentComparatorOutput"
+results <- runConcurrentComparatorAnalyses(connectionDetails = conn,
+                                cdmDatabaseSchema = cdmDatabaseSchema,
+                                exposureDatabaseSchema = cohortDatabaseSchema,
+                                exposureTable = cohortTable,
+                                outcomeDatabaseSchema = cohortDatabaseSchema,
+                                outcomeTable = cohortTable,
+                                outputFolder = outputFolder,
+                                analysisList = analysisList,
+                                targetIds = c(667),
+                                outcomeIds = c(668),
+                                controlIds = c(74816))
+
+aggreagateConcurrentComparatorResults(results, outputFolder)
+```
+

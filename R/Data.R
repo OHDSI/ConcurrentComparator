@@ -173,14 +173,13 @@ WHERE cohort_definition_id = ", targetId)
     zeroC <- length(andromeda$matchedCohort %>% filter(exposureId == 0,
                                                        timeAtRisk == 0) %>% distinct(subjectId))
 
-    ParallelLogger::logInfo("new stuff")
-
     andromeda$matchedCohort <- andromeda$matchedCohort %>% collect() %>% filter(timeAtRisk != 0.0)
 
     sql <- SqlRender::loadRenderTranslateSql(sqlFilename = "GetOutcomes.sql",
                                              packageName = "ConcurrentComparator",
                                              dbms = conn$dbms,
                                              outcome_database_schema = outcomeDatabaseSchema,
+                                             cdm_database_schema = cdmDatabaseSchema,
                                              outcome_table = outcomeTable,
                                              outcome_ids = c(outcomeIds),
                                              exposure_ids = targetId,
