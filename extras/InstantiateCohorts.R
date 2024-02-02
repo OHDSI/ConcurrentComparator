@@ -60,7 +60,42 @@ CohortGenerator::getCohortCounts(connectionDetails = conn,
                                  cohortTable = cohortTable)
 
 
+ccData <- getDbConcurrentComparatorData(connectionDetails = conn,
+                                        cdmDatabaseSchema = cdmDatabaseSchema,
+                                        targetId = 667,
+                                        outcomeIds = c(668,0),
+                                        studyEndDate = "2021-06-30",
+                                        exposureDatabaseSchema = cohortDatabaseSchema,
+                                        exposureTable = cohortTable,
+                                        outcomeDatabaseSchema = cohortDatabaseSchema,
+                                        outcomeTable = cohortTable,
+                                        timeAtRiskStart = 1,
+                                        timeAtRiskEnd = 21,
+                                        washoutTime = 22,
+                                        intermediateFileNameStem = NULL)
 
+saveConcurrentComparatorData(ccData, "t667_o668.zip")
+ccData <- loadConcurrentComparatorData("t667_o668.zip")
+
+# max times subject in T or C
+ccData$matchedCohort %>% group_by(subjectId) %>%
+    mutate(count = n()) %>% arrange(-count)
+
+# max times subject in C
+ccData$matchedCohort %>% filter(exposureId == 0) %>% group_by(subjectId) %>%
+    mutate(count = n()) %>% arrange(-count)
+
+population <- createStudyPopulation(ccData, outcomeId = 668)
+
+fit <- fitOutcomeModel(population = population)
+
+### OLD MATERIAL BELOW
+
+
+# saveRDS(population %>%
+#               select(exposureId, strataId,timeAtRisk,y) %>%
+#               collect(),
+#           file = "no_phi2.Rds")
 
 # test internal parts
 
