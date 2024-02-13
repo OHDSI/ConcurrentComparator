@@ -111,6 +111,9 @@ runConcurrentComparatorAnalyses <- function(connectionDetails,
             # TODO Remove code duplication (slight differences marked with X)
 
             if (length(controlIds) > 0) { # X
+
+                warning("deprecated use of `controlIds`.  use `CohortGenerator::generateNegativeControlOutcomeCohorts()`")
+
                 fileName <- paste0(fileStem, "c.zip") # X
 
                 if (!file.exists(fileName)) {
