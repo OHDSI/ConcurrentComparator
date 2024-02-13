@@ -71,6 +71,22 @@ CohortGenerator::generateCohortSet(connectionDetails = conn,
                                    incremental = TRUE,
                                    incrementalFolder = ".")
 
+negativeControlIds <- c(74816, 29735)
+
+negativeControlCohorts <- tibble(
+  cohortId = negativeControlIds,
+  cohortName = sprintf("Negative control %d", negativeControlIds),
+  outcomeConceptId = negativeControlIds
+)
+
+generateNegativeControlOutcomeCohorts(
+  connectionDetails = connectionDetails,
+  cdmDatabaseSchema = cdmDatabaseSchema,
+  cohortDatabaseSchema = cohortDatabaseSchema,
+  cohortTable = cohortTable,
+  negativeControlOutcomeCohortSet = negativeControlCohorts
+)
+
 CohortGenerator::getCohortCounts(connectionDetails = conn,
                                  cohortDatabaseSchema = cohortDatabaseSchema,
                                  cohortTable = cohortTable)
